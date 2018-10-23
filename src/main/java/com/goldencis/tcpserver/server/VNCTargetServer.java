@@ -89,6 +89,7 @@ public class VNCTargetServer {
                                 }
                             } catch (Exception e) {
                                 //log
+                                //关闭当前请求的流资源
                                 try {
                                     //取消注册
                                     if (sk != null) {
@@ -132,12 +133,8 @@ public class VNCTargetServer {
         if (destinationChannel != null) {
             if (uuidMap.containsKey(destinationChannel)) {
                 String uuid = uuidMap.get(destinationChannel);
-                TcpTransferRunner tcpTransferRunner = runnerMap.get(uuid);
-                SocketChannel sourceChannel = tcpTransferRunner.getSourceChannel();
-                if (sourceChannel != null) {
-                    //关闭关联的noVNC端通道
-                    sourceChannel.close();
-                }
+                //关闭关联的noVNC端通道
+                runnerMap.get(uuid).close();
             }
             //关闭目标通道
             destinationChannel.close();
