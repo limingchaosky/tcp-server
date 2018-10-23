@@ -9,6 +9,8 @@ public class ConstantsDto {
 
     public static final Integer TCP_PROTOCOL_VERSION = 0x1000;
 
+    public static final Integer TCP_PROTOCOL_HEAD_SIZE = 12;
+
     public static final String CONNECT_VNC_SERVER = "connectVncServer_c2s";
 
     public static final String CONNECT_VNC_CLIENT = "connectVncClient_c2s";
