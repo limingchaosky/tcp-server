@@ -4,9 +4,12 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.goldencis.tcpserver.constants.ConstantsDto;
 import com.goldencis.tcpserver.entity.TcpProtocolBody;
 import com.goldencis.tcpserver.runner.TcpTransferRunner;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.stereotype.Component;
 
+import javax.annotation.PostConstruct;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.ByteBuffer;
@@ -27,6 +30,7 @@ public class VNCTargetServer {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
+    @Autowired
     private Map<String, TcpTransferRunner> runnerMap;
 
     private Map<SocketChannel, String> uuidMap = new HashMap<>();
@@ -37,6 +41,27 @@ public class VNCTargetServer {
 
     @Value(value = "${server.VNCtarget.port}")
     private Integer vNCtargetPort;
+
+    @Autowired
+    private ThreadPoolTaskExecutor taskExecutor;
+
+    public void clear() {
+        try {
+            for (TcpTransferRunner tcpTransferRunner : runnerMap.values()) {
+                tcpTransferRunner.close();
+            }
+            for (SocketChannel channel : uuidMap.keySet()) {
+                if (channel != null) {
+                    channel.close();
+                }
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+
+        runnerMap.clear();
+        uuidMap.clear();
+    }
 
     public void server() throws IOException, InterruptedException {
         //1. 获取通道
@@ -253,5 +278,13 @@ public class VNCTargetServer {
 
         //启动TCP转发线程
         new Thread(tcpTransferRunner).start();
+    }
+
+    public Map<String, TcpTransferRunner> getRunnerMap() {
+        return runnerMap;
+    }
+
+    public Map<SocketChannel, String> getUuidMap() {
+        return uuidMap;
     }
 }

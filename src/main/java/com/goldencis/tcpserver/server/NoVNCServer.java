@@ -1,9 +1,15 @@
 package com.goldencis.tcpserver.server;
 
+import com.goldencis.tcpserver.constants.ConstantsDto;
+import com.goldencis.tcpserver.mq.MQClient;
 import com.goldencis.tcpserver.runner.TcpTransferRunner;
+import org.json.JSONObject;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.stereotype.Component;
 
+import javax.annotation.PostConstruct;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.channels.*;
@@ -22,7 +28,11 @@ import java.util.UUID;
 @Component
 public class NoVNCServer {
 
+    @Autowired
     private Map<String, TcpTransferRunner> runnerMap;
+
+    @Autowired
+    private MQClient publisher;
 
     private Map<SocketChannel, String> uuidMap = new HashMap<>();
 
@@ -32,6 +42,27 @@ public class NoVNCServer {
 
     @Value(value = "${server.noVNC.port}")
     private Integer noVNCPort;
+
+    @Autowired
+    private ThreadPoolTaskExecutor taskExecutor;
+
+    public void clear() {
+        try {
+            for (TcpTransferRunner tcpTransferRunner : runnerMap.values()) {
+                tcpTransferRunner.close();
+            }
+            for (SocketChannel channel : uuidMap.keySet()) {
+                if (channel != null) {
+                    channel.close();
+                }
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+
+        runnerMap.clear();
+        uuidMap.clear();
+    }
 
     public void server() throws IOException, InterruptedException {
         //1. 获取通道
@@ -70,10 +101,11 @@ public class NoVNCServer {
                     sChannel.register(selector, SelectionKey.OP_WRITE);
                 } else if (sk.isWritable()) {
                     if (sk.channel() instanceof SocketChannel) {
+                        SocketChannel socketChannel = (SocketChannel) sk.channel();
                         //为对应的noVNC通道创建runner实例
-                        this.createTcpTransferRunner((SocketChannel) sk.channel());
+                        this.createTcpTransferRunner(socketChannel);
                         //需要通知客户端
-
+                        this.notifyVNCTarget(socketChannel);
 
                         //将该通道从监听列表中移除
                         sk.cancel();
@@ -105,5 +137,35 @@ public class NoVNCServer {
             //以SocketChannel为key，uuid为value，方便channle查询自身的uuid
             uuidMap.put(channel, uuid);
         }
+    }
+
+    /**
+     *
+     * @param socketChannel
+     */
+    private void notifyVNCTarget(SocketChannel socketChannel) {
+        String clientUserIdsStr = "";
+
+        //设置消息为审批消息
+        String message = "bdpapprove";
+
+        //设置type为持久消息
+        int type = MQClient.MSG_SERIALIZABLE;
+
+        //组装消息内容
+        JSONObject contentJson = new JSONObject();
+        contentJson.put("action", ConstantsDto.CONNECT_VNC_SERVER);
+        contentJson.put("pipe", uuidMap.get(socketChannel));
+
+        //使用消息缓存服务
+        publisher.clientNotify(clientUserIdsStr ,message, contentJson.toString(), type);
+    }
+
+    public Map<String, TcpTransferRunner> getRunnerMap() {
+        return runnerMap;
+    }
+
+    public Map<SocketChannel, String> getUuidMap() {
+        return uuidMap;
     }
 }
