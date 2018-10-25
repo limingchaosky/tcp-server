@@ -16,4 +16,6 @@ public class ConstantsDto {
     public static final String CONNECT_VNC_CLIENT = "connectVncClient_c2s";
 
     public static final String CONNECT_VNC_SUCCESS = "connectVncSucc_s2c";
+
+    public static final String CONNECT_NOVNC_SERVER = "connectNoVncServer_c2s";
 }

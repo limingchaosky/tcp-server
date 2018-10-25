@@ -1,22 +1,21 @@
 package com.goldencis.tcpserver.server;
 
 import com.goldencis.tcpserver.constants.ConstantsDto;
+import com.goldencis.tcpserver.entity.TcpProtocolBody;
 import com.goldencis.tcpserver.mq.MQClient;
 import com.goldencis.tcpserver.runner.TcpTransferRunner;
+import com.goldencis.tcpserver.utils.TcpProtocolUtil;
 import org.json.JSONObject;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.stereotype.Component;
 
-import javax.annotation.PostConstruct;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.channels.*;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Map;
-import java.util.UUID;
 
 /**
  * 用于监听NoVNC的web端连接请求的服务，开辟单独的端口.
@@ -27,6 +26,8 @@ import java.util.UUID;
  */
 @Component
 public class NoVNCServer {
+
+    private ServerSocketChannel ssChannel;
 
     @Autowired
     private Map<String, TcpTransferRunner> runnerMap;
@@ -43,9 +44,6 @@ public class NoVNCServer {
     @Value(value = "${server.noVNC.port}")
     private Integer noVNCPort;
 
-    @Autowired
-    private ThreadPoolTaskExecutor taskExecutor;
-
     public void clear() {
         try {
             for (TcpTransferRunner tcpTransferRunner : runnerMap.values()) {
@@ -55,6 +53,10 @@ public class NoVNCServer {
                 if (channel != null) {
                     channel.close();
                 }
+            }
+            if (ssChannel != null) {
+                ssChannel.close();
+                ssChannel = null;
             }
         } catch (IOException e) {
             e.printStackTrace();
@@ -66,7 +68,7 @@ public class NoVNCServer {
 
     public void server() throws IOException, InterruptedException {
         //1. 获取通道
-        ServerSocketChannel ssChannel = ServerSocketChannel.open();
+        ssChannel = ServerSocketChannel.open();
 
         //2. 切换非阻塞模式
         ssChannel.configureBlocking(false);
@@ -98,17 +100,22 @@ public class NoVNCServer {
                     sChannel.configureBlocking(false);
 
                     //12. 将该通道注册到选择器上
-                    sChannel.register(selector, SelectionKey.OP_WRITE);
-                } else if (sk.isWritable()) {
+                    sChannel.register(selector, SelectionKey.OP_READ);
+                } else if (sk.isReadable()) {
                     if (sk.channel() instanceof SocketChannel) {
-                        SocketChannel socketChannel = (SocketChannel) sk.channel();
-                        //为对应的noVNC通道创建runner实例
-                        this.createTcpTransferRunner(socketChannel);
-                        //需要通知客户端
-                        this.notifyVNCTarget(socketChannel);
+                        SocketChannel sourceChannel = (SocketChannel) sk.channel();
+                        if (!uuidMap.containsKey(sourceChannel)) {
+                            //解析目标通道发送的tcp协议数据
+                            TcpProtocolBody body = TcpProtocolUtil.parseTcpProtocol(sourceChannel);
 
-                        //将该通道从监听列表中移除
-                        sk.cancel();
+                            //为对应的noVNC通道创建runner实例
+                            this.createTcpTransferRunner(sourceChannel);
+                            //需要通知客户端
+                            this.notifyVNCTarget(sourceChannel, body);
+
+                            //将该通道从监听列表中移除
+                            sk.cancel();
+                        }
                     }
                 }
                 //15. 取消选择键 SelectionKey
@@ -118,9 +125,8 @@ public class NoVNCServer {
     }
 
     private void createTcpTransferRunner(SocketChannel channel) throws IOException {
-        if (!uuidMap.containsKey(channel)) {
             //生成任务uuid
-            String uuid = UUID.randomUUID().toString();
+            String uuid = uuidMap.get(channel);
 
             //为本次tcp转发新建选择器
             Selector redirectSelector = Selector.open();
@@ -134,31 +140,20 @@ public class NoVNCServer {
 
             //以uuid为key，TCPTransferRunner为value，等待符合条件时，
             runnerMap.put(uuid, tcpTransferRunner);
-            //以SocketChannel为key，uuid为value，方便channle查询自身的uuid
-            uuidMap.put(channel, uuid);
-        }
     }
 
     /**
-     *
      * @param socketChannel
+     * @param body
      */
-    private void notifyVNCTarget(SocketChannel socketChannel) {
-        String clientUserIdsStr = "";
-
-        //设置消息为审批消息
-        String message = "bdpapprove";
-
-        //设置type为持久消息
-        int type = MQClient.MSG_SERIALIZABLE;
-
+    private void notifyVNCTarget(SocketChannel socketChannel, TcpProtocolBody body) {
         //组装消息内容
         JSONObject contentJson = new JSONObject();
         contentJson.put("action", ConstantsDto.CONNECT_VNC_SERVER);
         contentJson.put("pipe", uuidMap.get(socketChannel));
 
         //使用消息缓存服务
-        publisher.clientNotify(clientUserIdsStr ,message, contentJson.toString(), type);
+        publisher.clientNotify(body.getUserguid(), ConstantsDto.CONNECT_VNC_SERVER, contentJson.toString(), MQClient.MSG_REALTIME);
     }
 
     public Map<String, TcpTransferRunner> getRunnerMap() {

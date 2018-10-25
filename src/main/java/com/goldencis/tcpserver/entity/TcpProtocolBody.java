@@ -19,6 +19,8 @@ public class TcpProtocolBody {
 
     private String pipe;
 
+    private String userguid;
+
     public TcpProtocolBody() {
     }
 
